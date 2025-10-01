@@ -1,5 +1,7 @@
 python-telegram-bot
 google-generativeai
-tavily-python
 fpdf2
-
+pandas
+openpyxl
+requests
+tavily-python
