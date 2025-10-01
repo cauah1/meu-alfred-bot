@@ -15,6 +15,7 @@ from openai import OpenAI
 # --- 1. CONFIGURAÇÃO INICIAL ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+MEMORIA_FILE = "memoria_alfred.json"
 
 # --- 2. CARREGAMENTO DAS CHAVES E CLIENTES ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -25,7 +26,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # --- 3. FUNÇÕES AUXILIARES E DE GERAÇÃO ---
 
 def extrair_json(texto: str) -> str:
-    """Extrai um bloco de código JSON de uma string de texto, mesmo que haja outro texto ao redor."""
+    """Extrai um bloco de código JSON de uma string de texto."""
     match = re.search(r'```json\s*(\{.*?\})\s*```', texto, re.DOTALL)
     if match: return match.group(1)
     match = re.search(r'(\{.*?\})', texto, re.DOTALL)
@@ -97,6 +98,39 @@ model_tools = None
 tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
+# --- NOVAS FERRAMENTAS DE MEMÓRIA ---
+def salvar_memoria(topico: str, conteudo: str) -> dict:
+    """Use para salvar ou atualizar uma informação importante em sua memória de longo prazo. Sempre confirme a ação para o usuário."""
+    logger.info(f"Salvando memória sobre '{topico}'")
+    try:
+        memorias = {}
+        if os.path.exists(MEMORIA_FILE):
+            with open(MEMORIA_FILE, 'r', encoding='utf-8') as f:
+                memorias = json.load(f)
+        memorias[topico.lower()] = conteudo
+        with open(MEMORIA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(memorias, f, ensure_ascii=False, indent=4)
+        return {"status": f"A informação sobre '{topico}' foi salva com sucesso."}
+    except Exception as e:
+        return {"error": str(e)}
+
+def ler_memoria(topico: str) -> dict:
+    """Use para consultar sua memória de longo prazo sobre um tópico específico ANTES de tentar outras ferramentas. Se o tópico não for encontrado, retorne uma mensagem indicando isso."""
+    logger.info(f"Lendo memória sobre '{topico}'")
+    try:
+        if not os.path.exists(MEMORIA_FILE):
+            return {"resultado": "Nenhuma memória encontrada sobre este tópico."}
+        with open(MEMORIA_FILE, 'r', encoding='utf-8') as f:
+            memorias = json.load(f)
+        conteudo = memorias.get(topico.lower())
+        if conteudo:
+            return {"resultado": f"Lembrança sobre '{topico}': {conteudo}"}
+        else:
+            return {"resultado": f"Nenhuma memória encontrada sobre o tópico '{topico}'."}
+    except Exception as e:
+        return {"error": str(e)}
+
+# --- FERRAMENTAS EXISTENTES ---
 def tavily_search(query: str) -> dict:
     """Busca informações em tempo real na internet sobre um tópico ou pergunta."""
     logger.info(f"Executando busca autônoma para: '{query}'")
@@ -107,7 +141,7 @@ def tavily_search(query: str) -> dict:
         return {"error": str(e)}
 
 def obter_data_e_hora_atual() -> dict:
-    """Retorna a data e a hora atuais. Use esta ferramenta sempre que uma pergunta envolver 'hoje', 'agora', 'data atual', ou qualquer conceito de tempo presente."""
+    """Retorna a data e a hora atuais."""
     logger.info("Executando ferramenta de data/hora.")
     tz = pytz.timezone('America/Sao_Paulo')
     now = datetime.now(tz)
@@ -115,53 +149,37 @@ def obter_data_e_hora_atual() -> dict:
     return {"result": data_formatada}
 
 def analise_profunda_com_gpt(prompt: str) -> dict:
-    """Use para tarefas de raciocínio lógico muito complexo, análise profunda ou quando a máxima qualidade for necessária."""
+    """Use para tarefas de raciocínio lógico muito complexo."""
     logger.info(f"Consultando o especialista SÊNIOR (GPT-4o) para: '{prompt}'")
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Você é um especialista em análise lógica e profunda. Responda de forma direta e concisa."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        response = openai_client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": "Você é um especialista em análise lógica e profunda."}, {"role": "user", "content": prompt}])
         return {"result": response.choices[0].message.content}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as e: return {"error": str(e)}
 
 def analise_rapida_com_gpt(prompt: str) -> dict:
-    """Use para obter uma segunda opinião rápida, para brainstorming ou para tarefas gerais que não exijam análise profunda. Priorize esta ferramenta pela velocidade."""
+    """Use para obter uma segunda opinião rápida ou para brainstorming."""
     logger.info(f"Consultando o especialista JÚNIOR (GPT-3.5-Turbo) para: '{prompt}'")
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Você é um assistente rápido e eficiente. Responda de forma direta."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        response = openai_client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": "Você é um assistente rápido e eficiente."}, {"role": "user", "content": prompt}])
         return {"result": response.choices[0].message.content}
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception as e: return {"error": str(e)}
 
 try:
     if not all([TELEGRAM_BOT_TOKEN, GOOGLE_API_KEY, TAVILY_API_KEY, OPENAI_API_KEY]):
-        raise ValueError("Uma ou mais chaves de API (Telegram, Google, Tavily, OpenAI) estão faltando.")
+        raise ValueError("Chaves de API faltando.")
     genai.configure(api_key=GOOGLE_API_KEY)
     
-    # Cérebro para tarefas diretas (comandos /pdf, /planilha)
     model_chat = genai.GenerativeModel(model_name="models/gemini-pro-latest", system_instruction=("Seu nome é Alfred. Você é um assistente focado em executar tarefas diretas."))
     
-    # Cérebro principal para conversas, o Maestro Orquestrador
     model_tools = genai.GenerativeModel(
         model_name="models/gemini-pro-latest",
-        tools=[tavily_search, obter_data_e_hora_atual, analise_profunda_com_gpt, analise_rapida_com_gpt],
+        tools=[salvar_memoria, ler_memoria, tavily_search, obter_data_e_hora_atual, analise_profunda_com_gpt, analise_rapida_com_gpt],
         system_instruction=(
-            "Seu nome é Alfred. Você é o orquestrador de um time de especialistas. Sua função é entender a pergunta do usuário e decidir qual ferramenta usar. Você tem: a busca na web, o relógio, um analista júnior (rápido) e um analista sênior (profundo). Para a maioria das perguntas gerais, prefira o analista júnior pela velocidade. Use o analista sênior apenas para questões de alta complexidade lógica ou que exijam conhecimento profundo. Sintetize as informações e entregue a resposta final com sua própria voz: calma, direta e sábia."
+            "Seu nome é Alfred. Você é um orquestrador de especialistas com uma memória persistente. Sua função é entender a pergunta do usuário. Se a pergunta for sobre algo que você possa ter anotado, CONSULTE SUA MEMÓRIA PRIMEIRO usando a ferramenta 'ler_memoria'. Se for para salvar algo, use 'salvar_memoria'. Para outras tarefas, decida se responde sozinho ou se delega para suas outras ferramentas: busca na web, relógio, ou os analistas GPT (rápido ou profundo). Sintetize as informações e entregue a resposta final com sua própria voz: calma, direta e sábia."
         )
     )
     
-    logger.info("Modelos de IA (chat e orquestrador com modo turbo) inicializados com sucesso.")
+    logger.info("Modelos de IA (com memória persistente) inicializados com sucesso.")
 except Exception as e:
     logger.critical(f"FALHA CRÍTICA NA INICIALIZAÇÃO DE UM DOS MODELOS: {e}")
 
@@ -234,7 +252,7 @@ def main() -> None:
     application.add_handler(CommandHandler("planilha", planilha_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat))
     
-    logger.info("Iniciando bot Alfred - Versão 3.5 (O Maestro com Modo Turbo).")
+    logger.info("Iniciando bot Alfred - Versão 3.6 (Com Memória).")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
