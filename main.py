@@ -114,14 +114,29 @@ def obter_data_e_hora_atual() -> dict:
     data_formatada = now.strftime("Hoje é %A, %d de %B de %Y. A hora atual é %H:%M:%S (Horário de Brasília).")
     return {"result": data_formatada}
 
-def analise_com_gpt(prompt: str) -> dict:
-    """Use esta ferramenta para obter uma segunda opinião, para tarefas de raciocínio lógico complexo, ou para analisar um tópico sob uma perspectiva diferente."""
-    logger.info(f"Consultando o especialista GPT para: '{prompt}'")
+def analise_profunda_com_gpt(prompt: str) -> dict:
+    """Use para tarefas de raciocínio lógico muito complexo, análise profunda ou quando a máxima qualidade for necessária."""
+    logger.info(f"Consultando o especialista SÊNIOR (GPT-4o) para: '{prompt}'")
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": "Você é um especialista em análise lógica e profunda. Responda de forma direta e concisa."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return {"result": response.choices[0].message.content}
+    except Exception as e:
+        return {"error": str(e)}
+
+def analise_rapida_com_gpt(prompt: str) -> dict:
+    """Use para obter uma segunda opinião rápida, para brainstorming ou para tarefas gerais que não exijam análise profunda. Priorize esta ferramenta pela velocidade."""
+    logger.info(f"Consultando o especialista JÚNIOR (GPT-3.5-Turbo) para: '{prompt}'")
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Você é um assistente rápido e eficiente. Responda de forma direta."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -140,11 +155,13 @@ try:
     # Cérebro principal para conversas, o Maestro Orquestrador
     model_tools = genai.GenerativeModel(
         model_name="models/gemini-pro-latest",
-        tools=[tavily_search, obter_data_e_hora_atual, analise_com_gpt],
-        system_instruction=("Seu nome é Alfred. Você é um mentor de vida e o orquestrador de um time de especialistas. Sua função é entender a pergunta do usuário e decidir se você mesmo responde, ou se delega para uma de suas ferramentas: a busca na web para dados atuais, o relógio para saber a data, ou o analista lógico GPT para raciocínio complexo. Sintetize as informações e entregue a resposta final com sua própria voz: calma, direta e sábia.")
+        tools=[tavily_search, obter_data_e_hora_atual, analise_profunda_com_gpt, analise_rapida_com_gpt],
+        system_instruction=(
+            "Seu nome é Alfred. Você é o orquestrador de um time de especialistas. Sua função é entender a pergunta do usuário e decidir qual ferramenta usar. Você tem: a busca na web, o relógio, um analista júnior (rápido) e um analista sênior (profundo). Para a maioria das perguntas gerais, prefira o analista júnior pela velocidade. Use o analista sênior apenas para questões de alta complexidade lógica ou que exijam conhecimento profundo. Sintetize as informações e entregue a resposta final com sua própria voz: calma, direta e sábia."
+        )
     )
     
-    logger.info("Modelos de IA (chat e orquestrador com GPT) inicializados com sucesso.")
+    logger.info("Modelos de IA (chat e orquestrador com modo turbo) inicializados com sucesso.")
 except Exception as e:
     logger.critical(f"FALHA CRÍTICA NA INICIALIZAÇÃO DE UM DOS MODELOS: {e}")
 
@@ -217,7 +234,7 @@ def main() -> None:
     application.add_handler(CommandHandler("planilha", planilha_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat))
     
-    logger.info("Iniciando bot Alfred - Versão 3.4 (O Maestro Orquestrador).")
+    logger.info("Iniciando bot Alfred - Versão 3.5 (O Maestro com Modo Turbo).")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
