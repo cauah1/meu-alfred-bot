@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import pandas as pd
+import re
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from fpdf import FPDF
@@ -15,7 +16,20 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- 3. DEFINIÇÃO DAS FUNÇÕES DE GERAÇÃO DE ARQUIVOS ---
+# --- 3. FUNÇÕES AUXILIARES E DE GERAÇÃO ---
+
+def extrair_json(texto: str) -> str:
+    """Extrai um bloco de código JSON de uma string de texto, mesmo que haja outro texto ao redor."""
+    # Procura por blocos de código JSON marcados com ```json ... ``` ou apenas o JSON bruto
+    match = re.search(r'```json\s*(\{.*?\})\s*```', texto, re.DOTALL)
+    if match:
+        return match.group(1)
+    # Se não encontrar o bloco marcado, tenta encontrar qualquer JSON válido na string
+    match = re.search(r'(\{.*?\})', texto, re.DOTALL)
+    if match:
+        return match.group(1)
+    return texto # Retorna o texto original se nada for encontrado
+
 class PDF(FPDF):
     def header(self):
         if hasattr(self, 'title') and self.title: self.set_font("Arial", "B", 12); self.cell(0, 10, self.title, 0, 0, "C"); self.ln(10)
@@ -25,10 +39,10 @@ class PDF(FPDF):
 def criar_arquivo_pdf(titulo_documento: str, instrucao_ia: str) -> str:
     logger.info(f"Gerando PDF para: {instrucao_ia}")
     try:
-        # Pede para a IA gerar o conteúdo estruturado
         prompt = f"Crie o conteúdo para um documento PDF com base na seguinte instrução: '{instrucao_ia}'. Responda APENAS com uma estrutura JSON contendo uma chave 'secoes', que é uma lista de dicionários, cada um com 'titulo' e 'conteudo'."
         response = model.generate_content(prompt)
-        data = json.loads(response.text)
+        json_text = extrair_json(response.text) # <-- USA A FUNÇÃO DE EXTRAÇÃO
+        data = json.loads(json_text)
         
         pdf = PDF(); pdf.set_title(titulo_documento); pdf.add_page()
         for secao in data.get('secoes', []):
@@ -47,7 +61,8 @@ def criar_arquivo_planilha(nome_arquivo: str, instrucao_ia: str) -> str:
     try:
         prompt = f"Crie os dados para uma planilha com base na seguinte instrução: '{instrucao_ia}'. Responda APENAS com uma estrutura JSON. O JSON deve ser um dicionário onde cada chave é o nome de uma aba e o valor é uma lista de listas, com a primeira lista sendo o cabeçalho."
         response = model.generate_content(prompt)
-        dados = json.loads(response.text)
+        json_text = extrair_json(response.text) # <-- USA A FUNÇÃO DE EXTRAÇÃO
+        dados = json.loads(json_text)
 
         with pd.ExcelWriter(nome_arquivo, engine='openpyxl') as writer:
             for nome_aba, linhas in dados.items():
@@ -130,13 +145,12 @@ async def planilha_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # --- 6. PONTO DE ENTRADA ---
 def main() -> None:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    # Adiciona os handlers para cada funcionalidade
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("pdf", pdf_command))
     application.add_handler(CommandHandler("planilha", planilha_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat)) # Chat normal
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_chat))
     
-    logger.info("Iniciando bot Alfred - Versão 3.0 (Arquitetura de Comandos).")
+    logger.info("Iniciando bot Alfred - Versão 3.1 (com extração de JSON).")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
