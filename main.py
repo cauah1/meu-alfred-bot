@@ -12,12 +12,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- 1. CONFIGURAÇÃO DAS CHAVES E DA IA ---
-try:
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# As chaves foram inseridas diretamente no código para garantir o funcionamento.
 
+TELEGRAM_BOT_TOKEN = "8322649825:AAEfqCNLaIRpwfkFS-MBE_76_66RgBZ36x8"
+GOOGLE_API_KEY = "AIzaSyDk_7DkIAuheecGQM2NLXEa14DBUt2jhRw"
+
+try:
     if not TELEGRAM_BOT_TOKEN or not GOOGLE_API_KEY:
-        raise ValueError("As chaves TELEGRAM_TOKEN ou GOOGLE_API_KEY não foram encontradas nos Secrets.")
+        raise ValueError("Uma das chaves não foi inserida no código.")
 
     genai.configure(api_key=GOOGLE_API_KEY)
 
@@ -63,9 +65,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(response.text)
     except Exception as e:
         logger.error(f"Erro ao interagir com a IA: {e}")
+        # Mensagem de erro para o usuário final
         await update.message.reply_text(
             "Perdão, Mestre. Parece que tive um pequeno contratempo. Poderia tentar novamente em alguns instantes?"
         )
+        # Mensagem de erro para você, o desenvolvedor, para saber o que aconteceu
+        await update.message.reply_text(f"(Erro técnico para o desenvolvedor: {e})")
+
 
 # --- 3. FUNÇÃO PRINCIPAL (Onde o bot é iniciado) ---
 def main() -> None:
