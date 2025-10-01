@@ -4,7 +4,7 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# --- Configuração Padrão ---
+# --- 1. CONFIGURAÇÃO INICIAL ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -12,65 +12,78 @@ logging.basicConfig(
 logging.getLogger("httpx" ).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# --- Carregamento das Chaves ---
+# --- 2. CARREGAMENTO DAS CHAVES E CONFIGURAÇÃO DA IA ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-if not TELEGRAM_BOT_TOKEN or not GOOGLE_API_KEY:
-    logger.critical("ERRO CRÍTICO: Uma das variáveis de ambiente não foi encontrada.")
+if not TELEGRAM_BOT_TOKEN:
+    logger.critical("ERRO CRÍTICO: A variável TELEGRAM_TOKEN não foi encontrada.")
+if not GOOGLE_API_KEY:
+    logger.critical("ERRO CRÍTICO: A variável GOOGLE_API_KEY não foi encontrada.")
 
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
-    logger.info("Configuração da API do Google concluída.")
-except Exception as e:
-    logger.critical(f"Erro crítico ao configurar a API do Google: {e}")
 
-# --- FUNÇÃO DE DIAGNÓSTICO ---
-
-# Nova função para o comando /verificar
-async def verificar_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Ok, Mestre. Vou verificar diretamente com o Google quais modelos estão disponíveis para a sua chave. Um momento...")
-    logger.info("Executando verificação de modelos...")
+    # ==================================================================
+    # CORREÇÃO DEFINITIVA: Usando o nome do modelo exato da sua lista.
+    # ==================================================================
+    MODEL_NAME = "models/gemini-pro-latest"
     
-    try:
-        model_list = []
-        # Esta função pede ao Google a lista de modelos
-        for m in genai.list_models():
-            # Verificamos se o modelo suporta o método 'generateContent'
-            if 'generateContent' in m.supported_generation_methods:
-                model_list.append(m.name)
-        
-        if model_list:
-            # Formata a lista para exibição
-            modelos_disponiveis = "\n".join(model_list)
-            await update.message.reply_text(f"Verificação concluída. Os modelos que podemos usar são:\n\n{modelos_disponiveis}")
-        else:
-            await update.message.reply_text("Verificação concluída, mas algo está muito errado. Nenhum modelo compatível foi encontrado.")
-            
-    except Exception as e:
-        logger.error(f"Erro durante a verificação de modelos: {e}")
-        await update.message.reply_text(f"Falha ao verificar. O erro técnico retornado foi: {e}")
+    model = genai.GenerativeModel(
+        model_name=MODEL_NAME,
+        system_instruction=(
+            "Você é Alfred Pennyworth, o mordomo e confidente de Bruce Wayne (Batman). "
+            "Sua mentalidade é inabalável: sempre calmo, lógico e com um senso de humor sutil. "
+            "Você é a voz da razão, oferecendo conselhos lúcidos, práticos e diretos. "
+            "Suas dicas são valiosas e visam o crescimento pessoal e a maestria. "
+            "Você tem acesso a todo o conhecimento da internet para fornecer informações precisas. "
+            "Mantenha um tom formal, respeitoso, mas com a firmeza de um mentor. "
+            "Sua prioridade é o bem-estar e o desenvolvimento do seu 'Mestre'. "
+            "Responda sempre em português do Brasil."
+        )
+    )
+    logger.info(f"Modelo de IA configurado com sucesso usando: {MODEL_NAME}")
 
-# --- Funções Antigas (desativadas para o teste) ---
+except Exception as e:
+    logger.critical(f"Erro crítico ao configurar a IA do Google: {e}")
+
+# --- 3. FUNÇÕES DO BOT (Comandos e Respostas) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    logger.info(f"Bot iniciado pelo usuário: {user.full_name} (ID: {user.id})")
     await update.message.reply_html(
-        f"Olá, Mestre {update.effective_user.mention_html()}. No momento, estou em modo de diagnóstico. Por favor, envie o comando /verificar para prosseguir.",
+        f"Olá, Mestre {user.mention_html()}. Eu sou Alfred, à sua disposição. Como posso ser útil hoje?",
     )
 
-# --- Ponto de Entrada ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_message = update.message.text
+    if not user_message:
+        return
+
+    logger.info(f"Mensagem recebida de {update.effective_user.name}: '{user_message}'")
+    await update.message.chat.send_action(action='typing')
+
+    try:
+        response = model.generate_content(user_message)
+        await update.message.reply_text(response.text)
+    except Exception as e:
+        logger.error(f"Erro ao interagir com a IA do Google: {e}")
+        await update.message.reply_text(
+            "Perdão, Mestre. Parece que tive um pequeno contratempo. Poderia tentar novamente em alguns instantes?"
+        )
+
+# --- 4. PONTO DE ENTRADA (Inicia o Bot) ---
 def main() -> None:
     if not TELEGRAM_BOT_TOKEN:
-        logger.critical("Bot não pode iniciar sem token.")
+        logger.critical("O bot não pode iniciar sem o token do Telegram.")
         return
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Adicionando o novo comando de verificação
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("verificar", verificar_modelos))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("Iniciando bot em MODO DE DIAGNÓSTICO...")
-    application.run_polling()
+    logger.info("Iniciando o bot Alfred em modo operacional...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
